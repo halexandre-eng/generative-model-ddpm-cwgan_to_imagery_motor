@@ -9,6 +9,11 @@ WGAN-GP (condicional) com comparação justa vs DDPM:
 - Mesmas métricas (MSE, Corr, PSD cosine, mu/beta)
 - Reprodutível (seed + torch.Generator)
 - CLI para rodar localmente e compartilhar no GitHub
+
+Outputs (padrão igual ao DDPM/Colab):
+- models/modelo_wgan_wbcic_<CANAL>.pth
+- results/avaliacao_resultados_wgan_wbcic_TEST.csv
+- results/real_vs_synthetic_wgan_wbcic_TEST_todos_canais.csv
 """
 
 import os
@@ -85,7 +90,6 @@ def seed_everything(seed: int):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-    # consistência numérica
     torch.backends.cuda.matmul.allow_tf32 = False
     torch.backends.cudnn.allow_tf32 = False
 
@@ -176,11 +180,6 @@ class Discriminator(nn.Module):
 
 def gradient_penalty(discriminator, real_data, fake_data, cond, lambda_gp: float,
                      device: torch.device, torch_gen: torch.Generator):
-    """
-    WGAN-GP gradient penalty.
-    real_data, fake_data: (B, output_dim)
-    cond: (B, cond_dim)
-    """
     batch_size = real_data.size(0)
     eps = torch.rand(batch_size, 1, device=device, generator=torch_gen).expand_as(real_data)
     interpolated = eps * real_data + (1 - eps) * fake_data
@@ -235,7 +234,6 @@ def train_wgan_gp(
             cond = batch_inputs
             real_data = batch_targets
 
-            # Critic
             for _ in range(n_critic):
                 z = torch.randn(B, z_dim, device=device, generator=torch_gen)
                 fake_data = generator(z, cond)
@@ -261,7 +259,6 @@ def train_wgan_gp(
 
                 epoch_d_loss += float(d_loss.item())
 
-            # Generator
             z = torch.randn(B, z_dim, device=device, generator=torch_gen)
             fake_data = generator(z, cond)
             g_loss = -torch.mean(discriminator(fake_data, cond))
@@ -329,14 +326,6 @@ def build_segments_from_wbcic_flat(
     patients_to_use: Optional[List[int]],
     meta_cols_all: List[str],
 ):
-    """
-    Retorna:
-      inputs_flat:  (N, T*C_in)
-      targets_flat: (N, T)
-      targets_segments: (N, T, 1)  -> usado p/ real_1d
-      meta_flat: (N*T, M) ou None
-      meta_cols_use: lista de colunas realmente presentes
-    """
     seg_inputs, seg_targets, seg_meta = [], [], []
     meta_cols_use = _available_meta_cols(df, meta_cols_all)
 
@@ -402,7 +391,7 @@ def parse_args():
     ap.add_argument("--train_csv", required=True, help="Caminho do CSV de treino")
     ap.add_argument("--test_csv", required=True, help="Caminho do CSV de teste")
     ap.add_argument("--diretrizes", required=True, help="Arquivo YAML/JSON com diretrizes")
-    ap.add_argument("--out_dir", default="outputs", help="Pasta de saída (models/results)")
+    ap.add_argument("--out_dir", default="outputs", help="Pasta base de saída (models/results)")
 
     ap.add_argument("--fs", type=float, default=250.0)
     ap.add_argument("--seq_length", type=int, default=256)
@@ -465,7 +454,6 @@ def main():
         canal_alvo = diretriz["canal_alvo"]
         canais_entrada = diretriz["canais_entrada"]
 
-        # valida colunas mínimas
         for col in [canal_alvo] + list(canais_entrada):
             if col not in df_train.columns or col not in df_test.columns:
                 raise ValueError(f"Coluna '{col}' não encontrada em TRAIN/TEST.")
@@ -475,9 +463,7 @@ def main():
         print(f"Entradas: {canais_entrada}")
         print("========================================")
 
-        # ---------------------------
-        # BUILD TRAIN
-        # ---------------------------
+        # TRAIN
         train_inputs_flat, train_targets_flat, _, _, _ = build_segments_from_wbcic_flat(
             df=df_train,
             canais_entrada=canais_entrada,
@@ -500,15 +486,11 @@ def main():
             num_workers=0,
         )
 
-        # ---------------------------
         # MODELOS
-        # ---------------------------
         G = Generator(z_dim=args.z_dim, cond_dim=cond_dim, output_dim=out_dim, n_features=args.n_features).to(device)
         D = Discriminator(input_dim=out_dim, cond_dim=cond_dim, n_features=args.n_features).to(device)
 
-        # ---------------------------
         # TREINO
-        # ---------------------------
         train_wgan_gp(
             generator=G,
             discriminator=D,
@@ -523,16 +505,12 @@ def main():
             torch_gen=torch_gen,
         )
 
-        # ---------------------------
-        # SALVAR MODELO
-        # ---------------------------
-        model_path = models_dir / f"wgan_wbcic_{canal_alvo}.pth"
+        # SALVAR (nome igual ao seu padrão)
+        model_path = models_dir / f"modelo_wgan_wbcic_{canal_alvo}.pth"
         torch.save(G.state_dict(), model_path)
         print(f"Gerador salvo: {model_path}")
 
-        # ---------------------------
-        # BUILD TEST
-        # ---------------------------
+        # TEST
         test_inputs_flat, _, test_targets_segments, meta_flat, meta_cols_use = build_segments_from_wbcic_flat(
             df=df_test,
             canais_entrada=canais_entrada,
@@ -548,9 +526,7 @@ def main():
                 meta_flat_global = meta_flat
                 meta_cols_use_global = meta_cols_use
 
-        # ---------------------------
         # GERAÇÃO NO TEST
-        # ---------------------------
         conditioning_test = torch.tensor(test_inputs_flat, dtype=torch.float32, device=device)
         synth_test_flat = generate_synthetic_data(
             generator=G,
@@ -592,14 +568,14 @@ def main():
         todas_series[f"{canal_alvo}_synthetic"] = synth_1d
 
     # ========================================================
-    # SALVAR RESULTADOS
+    # SALVAR RESULTADOS (nome igual ao seu padrão)
     # ========================================================
     eval_df = pd.DataFrame(avaliacao_resultados)
-    out_eval = results_dir / "avaliacao_resultados_wgan_TEST.csv"
+    out_eval = results_dir / "avaliacao_resultados_wgan_wbcic_TEST.csv"
     eval_df.to_csv(out_eval, index=False)
     print(f"\nAvaliacao salva em: {out_eval}")
 
-    # real_vs_synthetic
+    # real_vs_synthetic (nome igual ao seu padrão)
     min_len = min(len(v) for v in todas_series.values())
     signals_df = pd.DataFrame({k: v[:min_len] for k, v in todas_series.items()})
 
@@ -616,11 +592,11 @@ def main():
     else:
         df_pairs_all = signals_df.iloc[:min_len].reset_index(drop=True)
 
-    out_pairs = results_dir / "real_vs_synthetic_wgan_TEST_todos_canais.csv"
+    out_pairs = results_dir / "real_vs_synthetic_wgan_wbcic_TEST_todos_canais.csv"
     df_pairs_all.to_csv(out_pairs, index=False)
     print(f"real_vs_synthetic (TEST) salvo em: {out_pairs}")
 
-    # run_config
+    # run_config (extra útil)
     with open(results_dir / "run_config.json", "w", encoding="utf-8") as f:
         json.dump(vars(args), f, ensure_ascii=False, indent=2)
     print(f"run_config.json salvo em: {results_dir / 'run_config.json'}")
