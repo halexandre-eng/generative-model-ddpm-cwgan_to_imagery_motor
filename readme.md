@@ -115,27 +115,6 @@ Os scripts esperam EEG em formato “long” (linhas por amostra) e reconstróem
 
 ---
 
-## Organização sugerida
-
-Você pode organizar como quiser, mas um exemplo:
-
-```
-.
-├── diretrizes.yaml
-├── ddpm_model.py
-├── wgan_model.py
-├── eegnet_model.py
-├── knn_model.py
-├── regressao_logistica.py
-├── unet_modelc.py
-├── dgaff.py
-
-```
-
-> Observação: nomes de scripts podem variar. Ajuste conforme os arquivos reais do seu repo.
-
----
-
 # 1) Modelos Generativos
 
 ## 1.1 Diretrizes de canais (YAML/JSON)
