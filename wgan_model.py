@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 
 """
 WGAN-GP (condicional) com comparação justa vs DDPM:
