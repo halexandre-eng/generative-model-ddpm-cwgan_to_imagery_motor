@@ -43,6 +43,8 @@ from torch.utils.data import Dataset, DataLoader
 from deap import base, creator, tools
 from sklearn.neural_network import MLPRegressor
 
+from project_utils import build_label_mapping_from_values, load_trials_with_metadata, seed_everything
+
 
 # =========================
 # Reprodutibilidade
@@ -330,9 +332,6 @@ def evaluate_with_predictions(
     return float(avg_loss), float(acc), y_true, y_pred, y_prob
 
 
-# =========================
-# DGAFF-like
-# =========================
 def mask_to_key(mask_bool: np.ndarray) -> Tuple[int, ...]:
     return tuple(np.flatnonzero(mask_bool).tolist())
 
@@ -477,7 +476,6 @@ def dgaff_select_channels_eegnet(
         xb = np.asarray(individual, dtype=np.float32).reshape(1, -1)
         return float(surrogate_model.predict(xb)[0])
 
-    # Pop inicial
     pop = toolbox.population(n=cfg.mu)
 
     # Seed inicial com avaliações verdadeiras
@@ -578,9 +576,6 @@ def dgaff_select_channels_eegnet(
     }
 
 
-# =========================
-# CLI / Main
-# =========================
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="DGAFF-like channel selection for a pretrained EEGNet (masking approach).")
 
@@ -646,7 +641,7 @@ def main() -> None:
     device = resolve_device(args.device)
     print("Device:", device)
 
-    seed_all(int(args.seed))
+    seed_everything(int(args.seed))
 
     if not ckpt_path.exists():
         raise FileNotFoundError(f"Checkpoint não encontrado: {ckpt_path}")
@@ -684,7 +679,7 @@ def main() -> None:
     criterion = nn.NLLLoss()
 
     # Carrega dados alinhados ao treino
-    X, y, y_raw, meta_list, info_te = load_trials_in_train_channel_order(
+    X, y, y_raw, meta_list, info_te = load_trials_with_metadata(
         csv_path,
         train_channel_cols=train_channel_cols,
         class_to_idx=class_to_idx,

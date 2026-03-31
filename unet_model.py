@@ -51,12 +51,9 @@ import argparse
 import json
 import math
 import os
-import random
-from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
-import pandas as pd
 
 import torch
 import joblib
@@ -85,192 +82,15 @@ from tensorflow.keras.layers import (
 )
 from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
 
+from project_utils import TrialsInfo, build_trials_from_csv, seed_everything
+
 
 # =========================
 # Reproducibility
 # =========================
 def seed_all(seed: int) -> None:
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
+    seed_everything(seed)
     tf.random.set_seed(seed)
-    os.environ["PYTHONHASHSEED"] = str(seed)
-
-
-# =========================
-# Data helpers
-# =========================
-META_COLS_CANDIDATES = {
-    "dataset_type",
-    "patient",
-    "session",
-    "epoch",
-    "time",
-    "label",
-    "label_name",
-}
-
-
-def detect_group_cols(df: pd.DataFrame) -> List[str]:
-    cols: List[str] = []
-    if "patient" in df.columns:
-        cols.append("patient")
-    if "session" in df.columns:
-        cols.append("session")
-    if "epoch" in df.columns:
-        cols.append("epoch")
-    if not cols:
-        raise ValueError("Nao encontrei colunas de agrupamento. Esperado ao menos uma de: patient, session, epoch.")
-    return cols
-
-
-def detect_label_col(df: pd.DataFrame) -> str:
-    if "label" in df.columns:
-        return "label"
-    for c in df.columns:
-        if c.lower() in ("y", "target", "class"):
-            return c
-    raise ValueError("Nao encontrei coluna de label. Esperado: 'label' ou uma de: y, target, class.")
-
-
-def detect_time_col(df: pd.DataFrame) -> Optional[str]:
-    if "time" in df.columns:
-        return "time"
-    for c in df.columns:
-        if c.lower() in ("t", "sample", "idx"):
-            return c
-    return None
-
-
-def detect_channel_cols(df: pd.DataFrame, label_col: str, time_col: Optional[str]) -> List[str]:
-    meta = set(META_COLS_CANDIDATES)
-    meta.add(label_col)
-    if time_col:
-        meta.add(time_col)
-
-    channel_cols: List[str] = []
-    for c in df.columns:
-        if c in meta:
-            continue
-        if pd.api.types.is_numeric_dtype(df[c]):
-            channel_cols.append(c)
-
-    if not channel_cols:
-        raise ValueError("Nao encontrei colunas de canais numericas.")
-    return channel_cols
-
-
-@dataclass(frozen=True)
-class TrialsInfo:
-    n_trials: int
-    n_channels: int
-    n_time: int
-    min_len: int
-    max_len: int
-    group_cols: List[str]
-    label_col: str
-    time_col: Optional[str]
-    channel_cols: List[str]
-    classes_original: List[int]
-    class_to_idx: Dict[int, int]
-
-    def to_dict(self) -> Dict:
-        return {
-            "n_trials": self.n_trials,
-            "n_channels": self.n_channels,
-            "n_time": self.n_time,
-            "min_len": self.min_len,
-            "max_len": self.max_len,
-            "group_cols": self.group_cols,
-            "label_col": self.label_col,
-            "time_col": self.time_col,
-            "channel_cols": self.channel_cols,
-            "classes_original": self.classes_original,
-            "class_to_idx": self.class_to_idx,
-        }
-
-
-def build_trials_from_csv(
-    csv_path: str,
-    train_channel_cols: Optional[List[str]] = None,
-    class_to_idx: Optional[Dict[int, int]] = None,
-) -> Tuple[np.ndarray, np.ndarray, TrialsInfo]:
-    """
-    Retorna:
-      X: (N, C, T)
-      y: (N,)
-      info: metadados do dataset
-
-    Se train_channel_cols for informado:
-      - valida que os canais existem no CSV e mantem a mesma ordem do treino.
-
-    Se class_to_idx for informado:
-      - aplica o mapeamento fixo de classes.
-    """
-    df = pd.read_csv(csv_path)
-
-    group_cols = detect_group_cols(df)
-    label_col = detect_label_col(df)
-    time_col = detect_time_col(df)
-
-    if train_channel_cols is None:
-        chan_cols = detect_channel_cols(df, label_col=label_col, time_col=time_col)
-    else:
-        missing = [c for c in train_channel_cols if c not in df.columns]
-        if missing:
-            raise ValueError(
-                f"CSV {csv_path} nao contem todos os canais esperados. Exemplo de missing: {missing[:10]}"
-            )
-        chan_cols = train_channel_cols
-
-    sort_cols = list(group_cols)
-    if time_col:
-        sort_cols.append(time_col)
-    df = df.sort_values(sort_cols).reset_index(drop=True)
-
-    X_list: List[np.ndarray] = []
-    y_list_raw: List[int] = []
-
-    for _, g in df.groupby(group_cols, sort=False):
-        y = g[label_col].iloc[0]
-        if g[label_col].nunique() > 1:
-            y = g[label_col].mode().iloc[0]
-
-        x = g[chan_cols].to_numpy(dtype=np.float32)  # (T, C)
-        X_list.append(x)
-        y_list_raw.append(int(y))
-
-    lengths = [x.shape[0] for x in X_list]
-    min_len = int(np.min(lengths))
-    max_len = int(np.max(lengths))
-
-    if min_len != max_len:
-        X_list = [x[:min_len, :] for x in X_list]
-
-    X = np.stack([x.T for x in X_list], axis=0).astype(np.float32)  # (N, C, T)
-    y_raw = np.array(y_list_raw, dtype=np.int64)
-
-    if class_to_idx is None:
-        classes = np.unique(y_raw)
-        class_to_idx = {int(c): i for i, c in enumerate(classes)}
-
-    # Aplica o mapping (pode levantar KeyError se surgir classe inesperada)
-    y = np.array([class_to_idx[int(v)] for v in y_raw], dtype=np.int64)
-
-    info = TrialsInfo(
-        n_trials=int(X.shape[0]),
-        n_channels=int(X.shape[1]),
-        n_time=int(X.shape[2]),
-        min_len=min_len,
-        max_len=max_len,
-        group_cols=group_cols,
-        label_col=label_col,
-        time_col=time_col,
-        channel_cols=chan_cols,
-        classes_original=[int(c) for c in np.unique(y_raw)],
-        class_to_idx={int(k): int(v) for k, v in class_to_idx.items()},
-    )
-    return X, y, info
 
 
 def make_split_indices(n: int, val_split: float, seed: int) -> Tuple[np.ndarray, np.ndarray]:
@@ -283,14 +103,8 @@ def make_split_indices(n: int, val_split: float, seed: int) -> Tuple[np.ndarray,
     return train_idx, val_idx
 
 
-# =========================
-# Normalizacao por trial
-# =========================
 def fit_transform_trials_scaler(X_train_T_C: np.ndarray) -> Tuple[StandardScaler, np.ndarray]:
-    """
-    X_train_T_C: (N, T, C)
-    Aplica StandardScaler no vetor achatado (T*C) de cada trial e devolve no formato (N, T, C).
-    """
+    """Ajusta o scaler em trials no formato (N, T, C)."""
     scaler = StandardScaler()
     N, T, C = X_train_T_C.shape
     flat = X_train_T_C.reshape(N, T * C)
@@ -306,11 +120,8 @@ def transform_trials_scaler(scaler: StandardScaler, X_T_C: np.ndarray) -> np.nda
     return flat_s.reshape(N, T, C).astype(np.float32)
 
 
-# =========================
-# U-Net Conv1D
-# =========================
 def create_unet_model(input_shape: Tuple[int, int], num_classes: int) -> Model:
-    inputs = Input(shape=input_shape)  # (T, C)
+    inputs = Input(shape=input_shape)
 
     conv1 = Conv1D(64, 3, activation="relu", padding="same")(inputs)
     pool1 = MaxPooling1D(2, padding="same")(conv1)
@@ -346,9 +157,6 @@ def create_unet_model(input_shape: Tuple[int, int], num_classes: int) -> Model:
     return Model(inputs=inputs, outputs=outputs)
 
 
-# =========================
-# Metrics and checkpoints
-# =========================
 def eval_keras(model: tf.keras.Model, X: np.ndarray, y: np.ndarray) -> Dict:
     y_proba = model.predict(X, verbose=0)
     y_pred = np.argmax(y_proba, axis=1)
@@ -366,9 +174,6 @@ def save_ckpt(obj: Dict, path: str) -> None:
     torch.save(obj, path, pickle_protocol=4)
 
 
-# =========================
-# CLI
-# =========================
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Treino do classificador U-Net Conv1D (WBCIC 2C) em duas etapas.")
 
@@ -393,9 +198,6 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-# =========================
-# Main
-# =========================
 def main() -> None:
     args = parse_args()
     seed_all(args.seed)

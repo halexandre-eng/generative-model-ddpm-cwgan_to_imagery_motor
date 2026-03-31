@@ -27,180 +27,20 @@ import argparse
 import json
 import math
 import os
-import random
-from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
-import pandas as pd
 
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset
 
-
-# =========================
-# Reproducibility
-# =========================
-def seed_all(seed: int, deterministic: bool = True) -> None:
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-
-    if deterministic:
-        torch.backends.cudnn.deterministic = True
-        torch.backends.cudnn.benchmark = False
-
-
-# =========================
-# Data utilities
-# =========================
-META_COLS_CANDIDATES = {
-    "dataset_type",
-    "patient",
-    "session",
-    "epoch",
-    "time",
-    "label",
-    "label_name",
-}
-
-
-def detect_group_cols(df: pd.DataFrame) -> List[str]:
-    cols: List[str] = []
-    if "patient" in df.columns:
-        cols.append("patient")
-    if "session" in df.columns:
-        cols.append("session")
-    if "epoch" in df.columns:
-        cols.append("epoch")
-
-    if not cols:
-        raise ValueError("Grouping columns not found. Expected at least one of: patient, session, epoch.")
-    return cols
-
-
-def detect_label_col(df: pd.DataFrame) -> str:
-    if "label" in df.columns:
-        return "label"
-    for c in df.columns:
-        if c.lower() in ("y", "target", "class"):
-            return c
-    raise ValueError("Label column not found. Expected 'label' or one of: y, target, class.")
-
-
-def detect_time_col(df: pd.DataFrame) -> Optional[str]:
-    if "time" in df.columns:
-        return "time"
-    for c in df.columns:
-        if c.lower() in ("t", "sample", "idx"):
-            return c
-    return None
-
-
-def detect_channel_cols(df: pd.DataFrame, label_col: str, time_col: Optional[str]) -> List[str]:
-    meta = set(META_COLS_CANDIDATES)
-    meta.add(label_col)
-    if time_col:
-        meta.add(time_col)
-
-    channel_cols: List[str] = []
-    for c in df.columns:
-        if c in meta:
-            continue
-        if pd.api.types.is_numeric_dtype(df[c]):
-            channel_cols.append(c)
-
-    if not channel_cols:
-        raise ValueError("No numeric channel columns found after excluding metadata columns.")
-    return channel_cols
-
-
-@dataclass(frozen=True)
-class TrialsInfo:
-    n_trials: int
-    n_channels: int
-    n_time: int
-    min_len: int
-    max_len: int
-    group_cols: List[str]
-    label_col: str
-    time_col: Optional[str]
-    channel_cols: List[str]
-
-    def to_dict(self) -> Dict:
-        return {
-            "n_trials": self.n_trials,
-            "n_channels": self.n_channels,
-            "n_time": self.n_time,
-            "min_len": self.min_len,
-            "max_len": self.max_len,
-            "group_cols": self.group_cols,
-            "label_col": self.label_col,
-            "time_col": self.time_col,
-            "channel_cols": self.channel_cols,
-        }
-
-
-def build_trials_from_csv(csv_path: str) -> Tuple[np.ndarray, np.ndarray, TrialsInfo]:
-    df = pd.read_csv(csv_path)
-
-    group_cols = detect_group_cols(df)
-    label_col = detect_label_col(df)
-    time_col = detect_time_col(df)
-    chan_cols = detect_channel_cols(df, label_col=label_col, time_col=time_col)
-
-    sort_cols = list(group_cols)
-    if time_col:
-        sort_cols.append(time_col)
-    df = df.sort_values(sort_cols).reset_index(drop=True)
-
-    X_list: List[np.ndarray] = []
-    y_list: List[int] = []
-
-    for _, g in df.groupby(group_cols, sort=False):
-        y = g[label_col].iloc[0]
-        if g[label_col].nunique() > 1:
-            y = g[label_col].mode().iloc[0]
-
-        x = g[chan_cols].to_numpy(dtype=np.float32)  # (T, C)
-        X_list.append(x)
-        y_list.append(int(y))
-
-    lengths = [x.shape[0] for x in X_list]
-    min_len = int(np.min(lengths))
-    max_len = int(np.max(lengths))
-
-    if min_len != max_len:
-        X_list = [x[:min_len, :] for x in X_list]
-
-    # (N, C, T)
-    X = np.stack([x.T for x in X_list], axis=0).astype(np.float32)
-    y = np.array(y_list, dtype=np.int64)
-
-    classes = np.unique(y)
-    class_to_idx = {c: i for i, c in enumerate(classes)}
-    y = np.array([class_to_idx[v] for v in y], dtype=np.int64)
-
-    info = TrialsInfo(
-        n_trials=int(X.shape[0]),
-        n_channels=int(X.shape[1]),
-        n_time=int(X.shape[2]),
-        min_len=min_len,
-        max_len=max_len,
-        group_cols=group_cols,
-        label_col=label_col,
-        time_col=time_col,
-        channel_cols=chan_cols,
-    )
-    return X, y, info
+from project_utils import TrialsInfo, build_trials_from_csv, seed_everything
 
 
 class EEGTrialsDataset(Dataset):
     def __init__(self, X: np.ndarray, y: np.ndarray):
-        # X: (N, C, T) -> (N, 1, C, T)
         self.X = torch.tensor(X, dtype=torch.float32).unsqueeze(1)
         self.y = torch.tensor(y, dtype=torch.long)
 
@@ -222,9 +62,6 @@ def make_split_indices(n: int, val_split: float, seed: int) -> Tuple[np.ndarray,
     return train_idx, val_idx
 
 
-# =========================
-# EEGNet (classic)
-# =========================
 class EEGNet(nn.Module):
     """
     Input: (B, 1, C, T)
@@ -288,9 +125,6 @@ class EEGNet(nn.Module):
         return self.classifier(feats)
 
 
-# =========================
-# Train / eval
-# =========================
 @torch.no_grad()
 def evaluate(model: nn.Module, loader: DataLoader, criterion: nn.Module, device: torch.device) -> Tuple[float, float]:
     model.eval()
@@ -341,9 +175,6 @@ def train_one_epoch(
     return total_loss / max(total, 1)
 
 
-# =========================
-# CLI
-# =========================
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Train EEGNet on trial-based EEG CSVs (two-stage training).")
 
@@ -395,7 +226,7 @@ def main() -> None:
     run_info_path = os.path.join(args.save_dir, "run_info.json")
 
     device = resolve_device(args.device)
-    seed_all(args.seed, deterministic=args.deterministic)
+    seed_everything(args.seed, deterministic=args.deterministic)
 
     print(f"Device: {device}")
     print("Loading training CSV...")
@@ -403,7 +234,11 @@ def main() -> None:
     print("Train info:", info_tr.to_dict())
 
     print("Loading test CSV...")
-    X_te, y_te, info_te = build_trials_from_csv(args.test_csv)
+    X_te, y_te, info_te = build_trials_from_csv(
+        args.test_csv,
+        train_channel_cols=info_tr.channel_cols,
+        class_to_idx=info_tr.class_to_idx,
+    )
     print("Test info:", info_te.to_dict())
 
     # Ensure same channel/time dims (cut time if needed)

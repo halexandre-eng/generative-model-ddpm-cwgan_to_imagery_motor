@@ -31,6 +31,11 @@ from sklearn.metrics import mean_squared_error
 from scipy.signal import welch
 from scipy.stats import pearsonr
 
+from project_utils import (
+    load_diretrizes as shared_load_diretrizes,
+    seed_everything as shared_seed_everything,
+)
+
 
 # ============================================================
 # Utils: YAML opcional (sem depender de pyyaml obrigatoriamente)
@@ -386,10 +391,10 @@ def build_segments_from_wbcic_flat(
 def parse_args():
     ap = argparse.ArgumentParser("WGAN-GP EEG - single file")
 
-    ap.add_argument("--train_csv", required=True, help="Caminho do CSV de treino")
-    ap.add_argument("--test_csv", required=True, help="Caminho do CSV de teste")
+    ap.add_argument("--train_csv", "--train-csv", dest="train_csv", required=True, help="Caminho do CSV de treino")
+    ap.add_argument("--test_csv", "--test-csv", dest="test_csv", required=True, help="Caminho do CSV de teste")
     ap.add_argument("--diretrizes", required=True, help="Arquivo YAML/JSON com diretrizes")
-    ap.add_argument("--out_dir", default="outputs", help="Pasta base de saída (models/results)")
+    ap.add_argument("--out_dir", "--out-dir", dest="out_dir", default="outputs", help="Pasta base de saída (models/results)")
 
     ap.add_argument("--fs", type=float, default=250.0)
     ap.add_argument("--seq_length", type=int, default=256)
@@ -433,11 +438,11 @@ def main():
     models_dir.mkdir(parents=True, exist_ok=True)
     results_dir.mkdir(parents=True, exist_ok=True)
 
-    seed_everything(args.seed)
+    shared_seed_everything(args.seed)
     torch_gen = torch.Generator(device=device)
     torch_gen.manual_seed(args.seed)
 
-    diretrizes = load_diretrizes(args.diretrizes)
+    diretrizes = shared_load_diretrizes(args.diretrizes)
 
     df_train = pd.read_csv(args.train_csv)
     df_test = pd.read_csv(args.test_csv)

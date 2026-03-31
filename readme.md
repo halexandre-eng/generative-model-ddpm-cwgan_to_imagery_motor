@@ -1,426 +1,149 @@
-# EEG Synthetic Generation + Classification + DGAFF-like Channel Selection (WBCIC 2C)
+# Projeto de Geracao e Classificacao de EEG
 
-Este repositório reúne **(1) modelos generativos** para criação de EEG sintético, **(2) modelos de classificação** para avaliar performance *downstream* e **(3) seleção de canais estilo DGAFF** usando *masking* em um EEGNet já treinado.
+Este repositorio concentra os scripts usados na dissertacao para:
 
-A proposta central é permitir **comparação justa** entre abordagens (mesmas convenções de entrada/saída, métricas padronizadas, reprodutibilidade por seed) e, quando aplicável, **evitar data leakage** (treinar apenas no TRAIN e avaliar apenas no TEST para geração sintética).
+- geracao sintetica de sinais EEG com `DDPM` e `WGAN-GP`
+- classificacao com `EEGNet`, `k-NN`, `Regressao Logistica`, `SVM + CSP` e `U-Net/Conv1D`
+- selecao de canais com abordagem `DGAFF-like`
 
----
+O foco desta versao e facilitar a execucao local sem alterar a estrutura principal dos experimentos.
 
-## Visão geral
+## Estrutura
 
-### 1) Modelos Generativos
-- **DDPM (Diffusion Models)** para geração condicional de canais-alvo de EEG.
-- **WGAN-GP Condicional** (por canal-alvo) com canais de entrada definidos em diretrizes (YAML/JSON).
-- Avaliação padronizada no TEST, com métricas compatíveis para comparação direta entre DDPM e WGAN:
-  - **MSE**
-  - **Correlação (Pearson)**
-  - **PSD cosine similarity**
-  - **Erro relativo de potência** nas bandas **µ (8–12 Hz)** e **β (13–30 Hz)**
+- `executar.py`: ponto de entrada unico para rodar qualquer experimento
+- `project_utils.py`: utilitarios compartilhados de leitura, seed e validacao
+- `diretrizes.yaml`: definicao de canais alvo e canais de entrada
+- `ddpm_model.py`: geracao com DDPM
+- `wgan_model.py`: geracao com WGAN-GP
+- `eegnet_model.py`: classificacao com EEGNet
+- `knn_model.py`: wrapper amigavel para o script de k-NN
+- `regressao_logistica.py`: classificacao com SGD log-loss
+- `svm_csp_model.py`: classificacao com SVM e Common Spatial Patterns
+- `unet_model.py`: classificacao com U-Net/Conv1D
+- `dgaff.py`: selecao de canais com masking
 
-### 2) Modelos de Classificação
-Classificadores implementados para EEG em formato de *trials* (épocas), com esquema **em duas etapas** (Stage 1: seleção em VAL; Stage 2: treino final em TRAIN+VAL e avaliação no TEST):
+## Ambiente
 
-- **EEGNet (PyTorch)** — entrada `(N, 1, C, T)`, treino em 2 etapas e checkpoints `.pt`.
-- **k-NN (scikit-learn)** — trials achatados `(C*T)`, busca de `k`, pipeline com `StandardScaler`.
-- **Regressão Logística (SGDClassifier / log_loss)** — trials achatados `(C*T)`, busca de `alpha`, pipeline com `StandardScaler(with_mean=False)`.
-- **U-Net / Conv1D (TensorFlow/Keras)** — entrada `(N, T, C)`, normalização por trial com scaler salvo em `.joblib`, Stage 2 opcional.
+Crie um ambiente virtual:
 
-### 3) Seleção de Canais (DGAFF-like) com GA + Masking
-- Seleção de canais **sem alterar a arquitetura** do EEGNet.
-- Em vez de remover canais (o que mudaria `n_channels` e pode quebrar o modelo), aplica **masking**: canais não selecionados são **zerados**, preservando o input `(N, 1, C, T)`.
-- GA do tipo **(μ+λ)** com:
-  - reparo para manter **K canais exatos**
-  - **cache** de avaliações reais
-  - **surrogate model** (MLPRegressor) para reduzir custo
-  - orçamento de avaliações reais por geração (`true_eval_budget`)
-
----
-
-## Requisitos
-
-Recomendado **Python 3.9+**.
-
-Dependências típicas (variam por script):
-
-- **Básicas**: `numpy`, `pandas`
-- **Classificação (sklearn)**: `scikit-learn`, `joblib`
-- **EEGNet / DDPM / WGAN (PyTorch)**: `torch`, `tqdm`, `scipy` (para PSD), `pyyaml` (opcional)
-- **U-Net / Conv1D**: `tensorflow`
-
----
-
-## Instalação
-
-Crie e ative um ambiente virtual:
-
-```bash
+```powershell
 python -m venv .venv
-# Linux/macOS
-source .venv/bin/activate
-# Windows
-# .venv\Scripts\activate
-````
+.venv\Scripts\Activate.ps1
+```
 
-Instale um conjunto mínimo (sklearn + torch):
+Instale as dependencias principais:
 
-```bash
+```powershell
 pip install -U pip
-pip install numpy pandas scikit-learn joblib torch tqdm scipy
+pip install -r requirements.txt
 ```
 
-Se usar diretrizes em YAML:
+Se for usar o modelo U-Net:
 
-```bash
-pip install pyyaml
+```powershell
+pip install -r requirements-unet.txt
 ```
 
-Se usar o classificador U-Net (Keras):
+Se for usar o modelo SVM + CSP:
 
-```bash
-pip install tensorflow
+```powershell
+pip install -r requirements-svm-csp.txt
 ```
 
----
+## Formato esperado dos CSVs
 
-## Formato esperado do CSV (padrão do repositório)
+Os scripts esperam um CSV em formato longo, com:
 
-Os scripts esperam EEG em formato “long” (linhas por amostra) e reconstróem *trials* agrupando as linhas.
+- uma coluna de label, como `label`, `y`, `target` ou `class`
+- pelo menos uma coluna de agrupamento entre `patient`, `session` e `epoch`
+- opcionalmente uma coluna temporal como `time`
+- colunas numericas dos canais EEG
 
-### Colunas obrigatórias
+Os trials sao reconstruidos automaticamente a partir dessas colunas.
 
-* **Label**: por padrão `label`
+## Execucao rapida
 
-  * Alternativas aceitas em alguns scripts: `y`, `target`, `class`
-* **Ao menos 1 coluna de agrupamento** para formar trials:
+O jeito mais simples de usar o projeto agora e pelo arquivo `executar.py`.
 
-  * `patient` e/ou `session` e/ou `epoch`
+### EEGNet
 
-### Colunas opcionais
-
-* `time` (ou equivalentes em alguns detectores): usada para **ordenar amostras** dentro do trial
-
-### Colunas de canais
-
-* Inferidas como **colunas numéricas** que **não** estão no conjunto de metadados
-* O trial é montado como matriz `(C, T)` e:
-
-  * EEGNet usa `(N, 1, C, T)`
-  * sklearn usa `(N, C*T)`
-  * U-Net Conv1D usa `(N, T, C)`
-
-### Compatibilidade entre TRAIN e TEST
-
-* Os scripts verificam consistência do número/ordem de canais.
-* Se `T` divergir, normalmente cortam pelo menor `T` para manter compatibilidade.
-
----
-
-# 1) Modelos Generativos
-
-## 1.1 Diretrizes de canais (YAML/JSON)
-
-Você define **quais canais gerar** (canal-alvo) e **quais canais condicionam** (canais de entrada).
-
-### YAML (recomendado) — `diretrizes.yaml`
-
-```yaml
-diretrizes:
-  - canal_alvo: "C3"
-    canais_entrada: ["C1", "C5", "CP3"]
-  - canal_alvo: "C4"
-    canais_entrada: ["C2", "C6", "CP4"]
+```powershell
+python executar.py eegnet --train-csv data\treino.csv --test-csv data\teste.csv --save-dir runs\eegnet
 ```
 
----
+### k-NN
 
-## 1.2 DDPM (Diffusion Models) — geração condicional (por canal-alvo)
-
-> Este README assume que você tem um script no mesmo padrão do WGAN, com entradas `TRAIN_CSV/TEST_CSV`, `diretrizes` e saída padronizada.
-> Ajuste o comando conforme o nome do seu arquivo.
-
-Exemplo:
-
-```bash
-python ddpm_eeg_single.py \
-  --train_csv data/WBCIC_2C_train_norm.csv \
-  --test_csv  data/WBCIC_2C_test_norm.csv \
-  --diretrizes diretrizes.yaml \
-  --out_dir outputs_ddpm
+```powershell
+python executar.py knn --train-csv data\treino.csv --test-csv data\teste.csv --save-dir runs\knn
 ```
 
-Saídas típicas (exemplo):
+### Regressao logistica
 
-```
-outputs_ddpm/
-├── models/
-└── results/
-    ├── avaliacao_resultados_ddpm_wbcic_TEST.csv
-    ├── real_vs_synthetic_ddpm_wbcic_TEST_todos_canais.csv
-    └── run_config.json
+```powershell
+python executar.py logreg --train-csv data\treino.csv --test-csv data\teste.csv --save-dir runs\logreg
 ```
 
----
+### SVM + CSP
 
-## 1.3 WGAN-GP Condicional — `wgan_model.py`
-
-Treina **somente no TRAIN** e avalia **somente no TEST**, gerando um modelo por **canal-alvo** das diretrizes.
-
-Exemplo básico:
-
-```bash
-python wgan_eeg_single.py \
-  --train_csv data/WBCIC_2C_train_norm.csv \
-  --test_csv  data/WBCIC_2C_test_norm.csv \
-  --diretrizes diretrizes.yaml \
-  --out_dir outputs_wgan
+```powershell
+python executar.py svm-csp --train-csv data\treino.csv --test-csv data\teste.csv --save-dir runs\svm_csp
 ```
 
-Parâmetros úteis (exemplos):
+### U-Net
 
-* `--epochs 40`
-* `--batch_size 64`
-* `--z_dim 128`
-* `--n_critic 5`
-* `--lambda_gp 10.0`
-* `--max_segments 12000`
-* `--patients 1 3 4`
-* `--gen_batch_size 2048`
-
-Saídas:
-
-```
-outputs_wgan/
-├── models/
-│   ├── modelo_wgan_wbcic_C3.pth
-│   ├── modelo_wgan_wbcic_C4.pth
-│   └── ...
-└── results/
-    ├── avaliacao_resultados_wgan_wbcic_TEST.csv
-    ├── real_vs_synthetic_wgan_wbcic_TEST_todos_canais.csv
-    └── run_config.json
+```powershell
+python executar.py unet --train-csv data\treino.csv --test-csv data\teste.csv --save-dir runs\unet --enable-stage2
 ```
 
----
+### WGAN
 
-# 2) Modelos de Classificação
-
-Todos os classificadores seguem o mesmo conceito:
-
-* reconstrução de *trials* a partir do CSV
-* Stage 1: **TRAIN/VAL** (split interno) para selecionar hiperparâmetro ou melhor época
-* Stage 2: treino final em **TRAIN+VAL** e avaliação em **TEST**
-
-## 2.1 EEGNet (PyTorch) — `eegnet_model.py`
-
-**Entrada:** `(N, 1, C, T)`.
-
-Etapas:
-
-* **Stage 1**: melhor checkpoint por `val_acc` (com early stopping por `patience`)
-* **Stage 2**: re-treina em TRAIN+VAL, salva melhor por menor `test_loss`
-
-  * pode parar quando `test_loss` < `test_loss` do melhor ponto do Stage 1
-
-Exemplo:
-
-```bash
-python eegnet_model.py \
-  --train-csv data/WBCIC_2C_train_norm.csv \
-  --test-csv  data/WBCIC_2C_test_norm.csv \
-  --save-dir  runs/eegnet_2c \
-  --val-split 0.1 \
-  --batch-size 16 \
-  --lr 1e-3 \
-  --max-epochs-stage1 1500 \
-  --patience 200 \
-  --max-epochs-stage2 600 \
-  --device auto
+```powershell
+python executar.py wgan --train-csv data\treino.csv --test-csv data\teste.csv --diretrizes diretrizes.yaml --out-dir outputs\wgan
 ```
 
-Saídas em `--save-dir`:
+### DDPM
 
-* `eegnet_stage1_best.pt`
-* `eegnet_final.pt`
-* `run_info.json`
-
----
-
-## 2.2 k-NN (scikit-learn) — `train_knn_2c.py`
-
-**Entrada:** trials achatados `(N, C*T)`.
-
-Etapas:
-
-* **Stage 1**: busca em grade para `k` (melhor por `val_acc`)
-* **Stage 2**: treino final em TRAIN+VAL e avaliação no TEST
-
-Exemplo:
-
-```bash
-python knn_model.py \
-  --train-csv data/WBCIC_2C_train_norm.csv \
-  --test-csv  data/WBCIC_2C_test_norm.csv \
-  --save-dir  runs/knn_2c \
-  --val-split 0.1 \
-  --k-grid 1 3 5 7 9 11 15 21 31
+```powershell
+python executar.py ddpm --train-csv data\treino.csv --test-csv data\teste.csv --diretrizes diretrizes.yaml --out-dir outputs\ddpm
 ```
 
-Saídas:
+### DGAFF-like
 
-* `knn_stage1_best.joblib`, `knn_final.joblib`
-* `knn_stage1_best.pt`, `knn_final.pt`
-* `run_info.json`
-
----
-
-## 2.3 Regressão Logística (SGDClassifier) — `regressao_logistica.py`
-
-**Entrada:** trials achatados `(N, C*T)`.
-
-Etapas:
-
-* **Stage 1**: busca em grade para `alpha` (melhor por `val_acc`)
-* **Stage 2**: treino final em TRAIN+VAL e avaliação no TEST
-
-Exemplo:
-
-```bash
-python regressao_logistica.py \
-  --train-csv data/WBCIC_2C_train_norm.csv \
-  --test-csv  data/WBCIC_2C_test_norm.csv \
-  --save-dir  runs/logreg_2c \
-  --val-split 0.1 \
-  --alpha-grid 1e-6 3e-6 1e-5 3e-5 1e-4 3e-4 1e-3 \
-  --class-weight-balanced
+```powershell
+python executar.py dgaff --ckpt runs\eegnet\eegnet_final.pt --csv data\teste.csv --out runs\ga_masking
 ```
 
-Saídas:
+## Execucao direta
 
-* `logreg_stage1_best.joblib`, `logreg_final.joblib`
-* `logreg_stage1_best.pt`, `logreg_final.pt`
-* `run_info.json`
+Os scripts originais continuam funcionando. Exemplos:
 
----
-
-## 2.4 U-Net / Conv1D (Keras) — `train_unet_2c.py`
-
-**Entrada:** `(N, T, C)` (Conv1D).
-
-Características:
-
-* Normalização por trial com `StandardScaler` aplicado no vetor `(T*C)`:
-
-  * salva scalers stage1 e final via `joblib`
-* Mapeamento fixo de classes (WBCIC 2C): `{1: 0, 2: 1}`
-* **Stage 2 é opcional** (`--enable-stage2`)
-
-Exemplo (apenas Stage 1):
-
-```bash
-python unet_model.py \
-  --train-csv data/WBCIC_2C_train_norm.csv \
-  --test-csv  data/WBCIC_2C_test_norm.csv \
-  --save-dir  runs/unet_2c \
-  --val-split 0.1 \
-  --batch-size 32 \
-  --lr 1e-3
+```powershell
+python eegnet_model.py --help
+python knn_model.py --help
+python regressao_logistica.py --help
+python svm_csp_model.py --help
+python unet_model.py --help
+python wgan_model.py --help
+python ddpm_model.py --help
+python dgaff.py --help
 ```
 
-Exemplo (com Stage 2):
+Os scripts `ddpm_model.py` e `wgan_model.py` aceitam tanto argumentos com underscore quanto com hifen para os parametros principais, por exemplo:
 
-```bash
-python unet_model.py \
-  --train-csv data/WBCIC_2C_train_norm.csv \
-  --test-csv  data/WBCIC_2C_test_norm.csv \
-  --save-dir  runs/unet_2c \
-  --enable-stage2 \
-  --max-epochs-stage2 100
+```powershell
+python wgan_model.py --train-csv data\treino.csv --test-csv data\teste.csv --out-dir outputs\wgan --diretrizes diretrizes.yaml
 ```
 
-Saídas:
+## Saidas
 
-* `unet_stage1_best.keras`, `unet_final.keras`
-* `unet_scaler_stage1.joblib`, `unet_scaler_final.joblib`
-* `unet_stage1_best.pt`, `unet_final.pt`
-* `run_info.json`
+Cada script salva seus resultados no diretorio configurado por argumento:
 
----
+- checkpoints dos modelos
+- metricas em `.pt`, `.json`, `.csv` ou `.joblib`
+- artefatos auxiliares como scalers e historicos
 
-# 3) GA DGAFF-like para seleção de canais (Masking) com EEGNet treinado
+## Observacoes
 
-## Motivação (por que masking?)
-
-Se o EEGNet foi treinado com **todos os canais**, remover canais “de verdade” muda `n_channels` e pode quebrar o modelo (ex.: depthwise conv depende do número de canais).
-
-Com **masking**:
-
-* o modelo permanece **idêntico** (mesmos pesos/arquitetura)
-* você mede **quais canais são mais informativos** para aquele classificador
-* opcionalmente: você pode **treinar do zero** um EEGNet só com os canais escolhidos (experimento adicional)
-
-## O que o script faz
-
-1. Carrega o checkpoint do EEGNet (`.pt`) contendo `model_state` e `info_train`
-2. Reconstrói trials do CSV para `(N, C, T)` e adapta para `(N, 1, C, T)`
-3. Avalia baseline com todos os canais
-4. Roda o GA **(μ+λ)** selecionando **K canais** com:
-
-   * reparo para manter K exatos
-   * cache de avaliações reais
-   * surrogate model (MLPRegressor)
-   * orçamento de avaliações reais por geração (`true_eval_budget`)
-5. Salva resultados (JSON/TXT/CSV) no diretório de saída
-
-## Estrutura esperada do checkpoint (EEGNet)
-
-O checkpoint deve conter pelo menos:
-
-* `model_state` (state_dict do EEGNet)
-* `info_train` com:
-
-  * `channel_cols` (lista de canais usados no treino)
-  * `n_channels`
-  * `n_time`
-
-Exemplo:
-
-```python
-ckpt = {
-  "model_state": ...,
-  "info_train": {
-    "channel_cols": ["C3", "Cz", ...],
-    "n_channels": 58,
-    "n_time": 1000
-  }
-}
-```
-
-## Execução (exemplo)
-
-> Ajuste o nome do script/args conforme seu arquivo real.
-
-```bash
-python dgaff.py \
-  --ckpt runs/eegnet_2c/eegnet_final.pt \
-  --csv  data/WBCIC_2C_test_norm.csv \
-  --k 15 \
-  --mu 30 \
-  --lambda 60 \
-  --generations 40 \
-  --true_eval_budget 30 \
-  --out_dir runs/ga_masking
-```
-
-Saídas típicas:
-
-* `best_mask.json` / `best_channels.txt`
-* logs/curvas do GA
-* resultados em CSV para auditoria
-
----
-
-## Reprodutibilidade
-
-* Todos os scripts aceitam `--seed` (ou equivalente) e fixam seeds de `random`, `numpy` e frameworks.
-* Em GPU, podem ocorrer pequenas variações dependendo de driver/CUDA/PyTorch/TensorFlow.
-* Para maior determinismo em PyTorch, use flags/arg de comportamento determinístico (quando disponível).
+- O `eegnet_model.py` agora força a ordem dos canais do teste a seguir a ordem usada no treino.
+- O arquivo `knn_model.py` foi adicionado para facilitar a chamada direta por nome esperado.
+- A logica comum de leitura de CSV e seeds foi centralizada em `project_utils.py`.

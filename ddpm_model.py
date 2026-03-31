@@ -23,6 +23,12 @@ from sklearn.metrics import mean_squared_error
 from scipy.signal import welch
 from scipy.stats import pearsonr
 
+from project_utils import (
+    load_diretrizes as shared_load_diretrizes,
+    seed_everything as shared_seed_everything,
+    seed_worker as shared_seed_worker,
+)
+
 
 # ============================================================
 # Utils: YAML opcional (sem depender de pyyaml obrigatoriamente)
@@ -489,10 +495,10 @@ def compute_psd_metrics(real_flat, synth_flat, fs=250.0):
 # ============================================================
 def parse_args():
     ap = argparse.ArgumentParser("DDPM EEG - single file")
-    ap.add_argument("--train_csv", required=True, help="Caminho do CSV de treino")
-    ap.add_argument("--test_csv", required=True, help="Caminho do CSV de teste")
+    ap.add_argument("--train_csv", "--train-csv", dest="train_csv", required=True, help="Caminho do CSV de treino")
+    ap.add_argument("--test_csv", "--test-csv", dest="test_csv", required=True, help="Caminho do CSV de teste")
     ap.add_argument("--diretrizes", required=True, help="Arquivo YAML/JSON com diretrizes")
-    ap.add_argument("--out_dir", default="outputs", help="Pasta de saída (models/results)")
+    ap.add_argument("--out_dir", "--out-dir", dest="out_dir", default="outputs", help="Pasta de saída (models/results)")
 
     ap.add_argument("--fs", type=float, default=250.0)
     ap.add_argument("--seq_length", type=int, default=256)
@@ -536,11 +542,11 @@ def main():
     models_dir.mkdir(parents=True, exist_ok=True)
     results_dir.mkdir(parents=True, exist_ok=True)
 
-    seed_everything(args.seed)
+    shared_seed_everything(args.seed)
     torch_gen = torch.Generator(device=device)
     torch_gen.manual_seed(args.seed)
 
-    diretrizes = load_diretrizes(args.diretrizes)
+    diretrizes = shared_load_diretrizes(args.diretrizes)
 
     META_COLS = ['dataset_type', 'patient', 'session', 'epoch', 'time', 'label', 'label_name']
 
@@ -594,7 +600,7 @@ def main():
             batch_size=args.batch_size,
             shuffle=True,
             num_workers=0,
-            worker_init_fn=lambda wid: seed_worker(wid, args.seed),
+            worker_init_fn=lambda wid: shared_seed_worker(wid, args.seed),
             generator=dl_gen,
             pin_memory=(device.type == "cuda"),
         )
