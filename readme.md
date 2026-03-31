@@ -13,7 +13,7 @@ O foco desta versao e facilitar a execucao local sem alterar a estrutura princip
 - `executar.py`: ponto de entrada unico para rodar qualquer experimento
 - `project_utils.py`: utilitarios compartilhados de leitura, seed e validacao
 - `diretrizes.yaml`: definicao de canais alvo e canais de entrada
-- `dgaff.py`: selecao de canais com masking
+- `requirements.txt`: dependencias do projeto
 
 ### `modelos_generativos/`
 
@@ -28,6 +28,10 @@ O foco desta versao e facilitar a execucao local sem alterar a estrutura princip
 - `svm_csp_model.py`: classificacao com SVM e Common Spatial Patterns
 - `unet_model.py`: classificacao com U-Net/Conv1D
 
+### `algoritmo_genetico/`
+
+- `dgaff.py`: selecao de canais com masking sobre EEGNet treinado
+
 ## Ambiente
 
 Crie um ambiente virtual:
@@ -37,23 +41,11 @@ python -m venv .venv
 .venv\Scripts\Activate.ps1
 ```
 
-Instale as dependencias principais:
+Instale tudo com um unico arquivo:
 
 ```powershell
 pip install -U pip
 pip install -r requirements.txt
-```
-
-Se for usar o modelo U-Net:
-
-```powershell
-pip install -r requirements-unet.txt
-```
-
-Se for usar o modelo SVM + CSP:
-
-```powershell
-pip install -r requirements-svm-csp.txt
 ```
 
 ## Formato esperado dos CSVs
@@ -121,7 +113,7 @@ python executar.py dgaff --ckpt runs\eegnet\eegnet_final.pt --csv data\teste.csv
 
 ## Execucao direta
 
-Os scripts tambem podem ser executados pelos novos caminhos:
+Os scripts tambem podem ser executados pelos caminhos organizados:
 
 ```powershell
 python modelos_classificadores\eegnet_model.py --help
@@ -131,7 +123,7 @@ python modelos_classificadores\svm_csp_model.py --help
 python modelos_classificadores\unet_model.py --help
 python modelos_generativos\wgan_model.py --help
 python modelos_generativos\ddpm_model.py --help
-python dgaff.py --help
+python algoritmo_genetico\dgaff.py --help
 ```
 
 Os scripts `modelos_generativos/ddpm_model.py` e `modelos_generativos/wgan_model.py` aceitam tanto argumentos com underscore quanto com hifen para os parametros principais. Exemplo:

@@ -30,6 +30,7 @@ import argparse
 import json
 import os
 import random
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -42,6 +43,10 @@ from torch.utils.data import Dataset, DataLoader
 
 from deap import base, creator, tools
 from sklearn.neural_network import MLPRegressor
+
+ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from project_utils import build_label_mapping_from_values, load_trials_with_metadata, seed_everything
 

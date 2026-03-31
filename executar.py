@@ -15,7 +15,7 @@ COMMANDS = {
     "svm-csp": "modelos_classificadores/svm_csp_model.py",
     "logreg": "modelos_classificadores/regressao_logistica.py",
     "unet": "modelos_classificadores/unet_model.py",
-    "dgaff": "dgaff.py",
+    "dgaff": "algoritmo_genetico/dgaff.py",
 }
 
 

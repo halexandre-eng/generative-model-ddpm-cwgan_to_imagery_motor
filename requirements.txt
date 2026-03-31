@@ -7,3 +7,5 @@ tqdm
 scipy
 PyYAML
 deap
+mne
+tensorflow
