@@ -8,13 +8,13 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 COMMANDS = {
-    "ddpm": "ddpm_model.py",
-    "wgan": "wgan_model.py",
-    "eegnet": "eegnet_model.py",
-    "knn": "knn_model",
-    "svm-csp": "svm_csp_model.py",
-    "logreg": "regressao_logistica.py",
-    "unet": "unet_model.py",
+    "ddpm": "modelos_generativos/ddpm_model.py",
+    "wgan": "modelos_generativos/wgan_model.py",
+    "eegnet": "modelos_classificadores/eegnet_model.py",
+    "knn": "modelos_classificadores/knn_model.py",
+    "svm-csp": "modelos_classificadores/svm_csp_model.py",
+    "logreg": "modelos_classificadores/regressao_logistica.py",
+    "unet": "modelos_classificadores/unet_model.py",
     "dgaff": "dgaff.py",
 }
 

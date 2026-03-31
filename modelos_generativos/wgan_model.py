@@ -18,6 +18,7 @@ import os
 import json
 import random
 import argparse
+import sys
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
 
@@ -30,6 +31,10 @@ from tqdm import tqdm
 from sklearn.metrics import mean_squared_error
 from scipy.signal import welch
 from scipy.stats import pearsonr
+
+ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from project_utils import (
     load_diretrizes as shared_load_diretrizes,

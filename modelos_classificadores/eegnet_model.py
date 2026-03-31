@@ -27,6 +27,8 @@ import argparse
 import json
 import math
 import os
+import sys
+from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
@@ -35,6 +37,10 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset
+
+ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from project_utils import TrialsInfo, build_trials_from_csv, seed_everything
 
